@@ -9,90 +9,124 @@ import (
 	"time"
 )
 
-type Adress struct {
-	Logradouro string `json:street`
-	Bairro     string `json:neighborhood`
-	Cidade     string `json:city`
-	Estado     string `json:state`
-	Cep        string `json:cep`
+type EnderecoFinal struct {
+	Logradouro string
+	Bairro     string
+	Cidade     string
+	Estado     string
+	CEP        string
 }
 
-type ViaCEPENDERECO struct {
-	Logradouro string `json:logradouro`
-	Bairro     string `json:bairro`
-	Localidade string `json:localidade`
-	UF         string `json:uf`
-	Cep        string `json:cep`
-}
-type ResultAPI struct {
-	Fonte  string
-	Adress *Adress
+type BrasilAPIResponse struct {
+	Street       string `json:"street"`
+	Neighborhood string `json:"neighborhood"`
+	City         string `json:"city"`
+	State        string `json:"state"`
+	Cep          string `json:"cep"`
 }
 
-func fetchBasilAPI(cep string, ch chan<- *ResultAPI) {
+type ViaCEPResponse struct {
+	Logradouro string `json:"logradouro"`
+	Bairro     string `json:"bairro"`
+	Localidade string `json:"localidade"`
+	UF         string `json:"uf"`
+	Cep        string `json:"cep"`
+}
+
+type ResultadoAPI struct {
+	Fonte    string
+	Endereco *EnderecoFinal
+}
+
+func fetchBrasilAPI(cep string, ch chan<- *ResultadoAPI) {
 	url := fmt.Sprintf("https://brasilapi.com.br/api/cep/v1/%s", cep)
+
 	resp, err := http.Get(url)
 	if err != nil {
 		return
 	}
 	defer resp.Body.Close()
+
 	if resp.StatusCode != http.StatusOK {
 		return
 	}
-	var adress Adress
-	if err := json.NewDecoder(resp.Body).Decode(&adress); err != nil {
+
+	var brasilApiResponse BrasilAPIResponse
+	if err := json.NewDecoder(resp.Body).Decode(&brasilApiResponse); err != nil {
 		return
 	}
-	ch <- &ResultAPI{Fonte: "BrasilAPI", Adress: &adress}
+
+	endereco := &EnderecoFinal{
+		Logradouro: brasilApiResponse.Street,
+		Bairro:     brasilApiResponse.Neighborhood,
+		Cidade:     brasilApiResponse.City,
+		Estado:     brasilApiResponse.State,
+		CEP:        brasilApiResponse.Cep,
+	}
+
+	ch <- &ResultadoAPI{Fonte: "BrasilAPI", Endereco: endereco}
 }
-func fetchViaCepAPI(cep string, ch chan<- *ResultAPI) {
-	url := fmt.Sprintf("https://viacep.com.br/ws/%s/json/", cep)
+
+func fetchViaCEP(cep string, ch chan<- *ResultadoAPI) {
+	url := fmt.Sprintf("http://viacep.com.br/ws/%s/json/", cep)
+
 	resp, err := http.Get(url)
 	if err != nil {
 		return
 	}
 	defer resp.Body.Close()
+
 	if resp.StatusCode != http.StatusOK {
 		return
 	}
-	var viaCepResp ViaCEPENDERECO
-	if err := json.NewDecoder(resp.Body).Decode(&viaCepResp); err != nil {
+
+	var viaCepResponse ViaCEPResponse
+	if err := json.NewDecoder(resp.Body).Decode(&viaCepResponse); err != nil {
 		return
 	}
-	adress := &Adress{
-		Logradouro: viaCepResp.Logradouro,
-		Bairro:     viaCepResp.Bairro,
-		Cidade:     viaCepResp.Localidade,
-		Estado:     viaCepResp.UF,
-		Cep:        viaCepResp.Cep,
+
+	endereco := &EnderecoFinal{
+		Logradouro: viaCepResponse.Logradouro,
+		Bairro:     viaCepResponse.Bairro,
+		Cidade:     viaCepResponse.Localidade,
+		Estado:     viaCepResponse.UF,
+		CEP:        viaCepResponse.Cep,
 	}
-	ch <- &ResultAPI{Fonte: "ViaCepAPI", Adress: adress}
+
+	ch <- &ResultadoAPI{Fonte: "ViaCEP", Endereco: endereco}
 }
 
 func main() {
-	fmt.Println("Digite o Cep para consulta: ")
+	fmt.Print("Digite o CEP para consulta: ")
 	scanner := bufio.NewScanner(os.Stdin)
 	scanner.Scan()
 	cep := scanner.Text()
+
 	if cep == "" {
-		fmt.Println("Cep inválido")
+		fmt.Println("CEP inválido.")
 		return
 	}
-	fmt.Printf("\nBuscando CEP: %s\n nas Apis... \n\n", cep)
-	ch := make(chan *ResultAPI)
-	go fetchBasilAPI(cep, ch)
-	go fetchViaCepAPI(cep, ch)
+
+	fmt.Printf("\nBuscando CEP %s nas APIs...\n", cep)
+
+	ch := make(chan *ResultadoAPI)
+
+	go fetchBrasilAPI(cep, ch)
+	go fetchViaCEP(cep, ch)
+
 	select {
-	case result := <-ch:
-		fmt.Printf("Api most quick", result.Fonte)
-		fmt.Println("----------------------------------------")
-		fmt.Printf("CEP: %s\n", result.Adress.Cep)
-		fmt.Printf("Logradouro: %s\n", result.Adress.Logradouro)
-		fmt.Printf("Bairro: %s\n", result.Adress.Bairro)
-		fmt.Printf("Cidade: %s\n", result.Adress.Cidade)
-		fmt.Printf("Estado: %s\n", result.Adress.Estado)
-		fmt.Println("----------------------------------------")
+	case resultado := <-ch:
+		fmt.Println("\n---------------------------------")
+		fmt.Printf("Resposta mais rápida da API: %s\n", resultado.Fonte)
+		fmt.Println("---------------------------------")
+		fmt.Printf("CEP:         %s\n", resultado.Endereco.CEP)
+		fmt.Printf("Logradouro:  %s\n", resultado.Endereco.Logradouro)
+		fmt.Printf("Bairro:      %s\n", resultado.Endereco.Bairro)
+		fmt.Printf("Cidade:      %s\n", resultado.Endereco.Cidade)
+		fmt.Printf("Estado:      %s\n", resultado.Endereco.Estado)
+		fmt.Println("---------------------------------")
+
 	case <-time.After(1 * time.Second):
-		fmt.Println("Error: Timeout. Nenhuma api respondeu em 1 segundo")
+		fmt.Println("\n Erro: Timeout. Nenhuma API respondeu em 1 segundo.")
 	}
 }
